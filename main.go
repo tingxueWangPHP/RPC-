@@ -98,25 +98,25 @@ func main() {
 		//a := time.Now()
 		<-ch
 		servers := rpc.NewMultiServersDiscovery()
-		servers.Update(serverList)
-
 		wg2 := sync.WaitGroup{}
 
 		for i := 0; i < 10; i++ {
 			wg2.Add(1)
 			go func() {
 				defer wg2.Done()
-				addr, _ := servers.Get(rpc.RandomSelect)
-				fmt.Println(addr)
-				client, _ := rpc.DialServer("tcp", addr)
-				defer func() {
-					client.Close()
-				}()
+				client, _ := rpc.DialServer(servers, rpc.RoundRobinSelect, serverList)
 				var ret = new(Test)
-				client.Call(client, "Person.Say3", time.Second*10, ret)
-				//fmt.Println(ret)
+				err := client.Call(client, "Person.Say3", time.Second*10, ret)
+				if err != nil {
+					fmt.Println(err)
+				} else {
+					fmt.Println(ret)
+				}
+				
 			}()
 		}
+
+		defer rpc.ClientsClose()
 
 		wg2.Wait()
 
@@ -159,28 +159,33 @@ func main() {
 		defer func() {
 			wg.Done()
 		}()
-		rpc.Serv.Register(Person{})
+		
+		s := rpc.NewServer()
+
+		s.Register(Person{})
 
 		var address string = "127.0.0.1:20000"
 		lock.Lock()
 		serverList = append(serverList, address)
 		lock.Unlock()
 		wgServer.Done()
-		rpc.ListenAndServe("tcp", address)
+		rpc.ListenAndServe(s, "tcp", address)
 	}()
 
 	go func() {
 		defer func() {
 			wg.Done()
 		}()
-		rpc.Serv.Register(Person{})
+		s := rpc.NewServer()
+
+		s.Register(Person{})
 
 		var address string = "127.0.0.1:20001"
 		lock.Lock()
 		serverList = append(serverList, address)
 		lock.Unlock()
 		wgServer.Done()
-		rpc.ListenAndServe("tcp", address)
+		rpc.ListenAndServe(s, "tcp", address)
 	}()
 
 	wgServer.Wait()

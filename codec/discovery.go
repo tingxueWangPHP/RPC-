@@ -28,9 +28,14 @@ type MultiServersDiscovery struct {
 }
 
 func NewMultiServersDiscovery() *MultiServersDiscovery {
-	return &MultiServersDiscovery{
+	m := &MultiServersDiscovery{
 		rand: rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
+
+	//初始化随机
+	m.index = m.rand.Int()
+
+	return m
 }
 
 func (m *MultiServersDiscovery) Update(servers []string) error {

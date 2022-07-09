@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	//"fmt"
 )
 
 type DataFormat struct {
@@ -16,24 +17,38 @@ type DataFormat struct {
 }
 
 type (
-	Server struct{}
+	Server struct{
+		relation map[string]interface{}
+		lock 	sync.Mutex
+	}
 
 	Client struct {
-		conn net.Conn
+		conn 	net.Conn
+		lock 	sync.Mutex
+		address string
+		isClosed bool
 	}
 )
 
-var (
-	relation = map[string]interface{}{}
-	Serv     *Server
+type Xclient struct {
+	clientCache map[string]*Client
+	lock 	sync.Mutex
+}
 
-	lock sync.Mutex
-)
+var once sync.Once
+var x *Xclient
+
+
+func NewServer() *Server {
+	return &Server{
+		relation:make(map[string]interface{}),
+	}
+}
 
 func (s *Server) Register(structItem interface{}) {
-	lock.Lock()
-	defer lock.Unlock()
-	relation[reflect.TypeOf(structItem).Name()] = structItem
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	s.relation[reflect.TypeOf(structItem).Name()] = structItem
 }
 
 func (s *Server) parseHeader(header string) (string, string) {
@@ -41,7 +56,7 @@ func (s *Server) parseHeader(header string) (string, string) {
 	return ss[0], ss[1]
 }
 
-func ListenAndServe(protocol, address string) error {
+func ListenAndServe(s *Server, protocol, address string) error {
 	listen, err := net.Listen(protocol, address)
 	if err != nil {
 		return err
@@ -57,45 +72,85 @@ func ListenAndServe(protocol, address string) error {
 
 		go func(conn net.Conn) {
 			defer conn.Close()
+			
+			data, err := Decode(conn)
+			for err == nil {
+				structName, methodName := s.parseHeader(data.Header)
+				fn := reflect.ValueOf(s.relation[structName]).MethodByName(methodName)
 
-			data, _ := Decode(conn)
-			structName, methodName := Serv.parseHeader(data.Header)
-			fn := reflect.ValueOf(relation[structName]).MethodByName(methodName)
+				//构建参数
+				tempParam := []reflect.Value{}
+				for i := 0; i < len(data.Body); i++ {
+					tempParam = append(tempParam, reflect.ValueOf(data.Body[i]))
+				}
+				values := fn.Call(tempParam)
 
-			//构建参数
-			tempParam := []reflect.Value{}
-			for i := 0; i < len(data.Body); i++ {
-				tempParam = append(tempParam, reflect.ValueOf(data.Body[i]))
+				d := DataFormat{
+					Header: "reply",
+				}
+				for _, item := range values {
+					d.Body = append(d.Body, item.Interface())
+				}
+
+				Encode(conn, d)
+				data, err = Decode(conn)
 			}
-			values := fn.Call(tempParam)
-
-			d := DataFormat{
-				Header: "reply",
-			}
-			for _, item := range values {
-				d.Body = append(d.Body, item.Interface())
-			}
-
-			Encode(conn, d)
 		}(conn)
 	}
 
 	return nil
 }
 
-func DialServer(protocol, address string) (*Client, error) {
+func dialServer(protocol, address string) (*Client, error) {
+	x.lock.Lock()
+	defer x.lock.Unlock()
+	//判断cache里是否有这个链接
+	if v, ok := x.clientCache[address]; ok {
+		if !v.isClosed {
+			return v, nil
+		}
+	}
 	conn, err := net.Dial(protocol, address)
 	if err != nil {
 		return nil, err
 	}
 
-	return &Client{
+	x.clientCache[address] = &Client{
 		conn: conn,
-	}, nil
+		address: address,
+	}
+
+	return x.clientCache[address], nil
 
 }
 
+func DialServer(discovery Discovery, mode selectMode, serverList []string) (*Client, error) {
+	//优化
+	once.Do(func(){
+		_ = discovery.Update(serverList)
+		x = &Xclient{
+			clientCache:make(map[string]*Client),
+		}
+	})
+	
+	if addr, err := discovery.Get(mode); err != nil {
+		return nil, err
+	} else {
+		return dialServer("tcp", addr)
+	}
+}
+
+func ClientsClose() error {
+	for k, v := range x.clientCache {
+		v.Close()
+		delete(x.clientCache, k)
+	}
+
+	return nil
+}
+
 func (c *Client) Close() error {
+	c.isClosed = true
 	return c.conn.Close()
 }
 
@@ -109,17 +164,21 @@ func (c *Client) Call(cli *Client, method string, timeout time.Duration, ret int
 	ctx, _ := context.WithTimeout(context.Background(), timeout)
 
 	go func() {
-		d := DataFormat{
+		cli.lock.Lock()
+		defer cli.lock.Unlock()
+		Encode(cli.conn, DataFormat{
 			Header: method,
 			Body:   args,
-		}
-		Encode(cli.conn, d)
+		})
 		res, _ := Decode(cli.conn)
 		resCh <- res
 	}()
 
 	select {
 	case res := <-resCh:
+		if res == nil {
+			return errors.New("network error")
+		}
 		for _, item := range res.Body {
 			if err := recursionGet2(item, ret); err != nil {
 				return err
