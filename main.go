@@ -5,6 +5,7 @@ import (
 	rpc "rpc/codec"
 	"sync"
 	"time"
+	"net/http"
 )
 
 type Person struct{}
@@ -82,21 +83,14 @@ type Test2 struct {
 func main() {
 	var (
 		wg       = sync.WaitGroup{}
-		wgServer = sync.WaitGroup{}
-
-		serverList = []string{}
-
-		lock sync.Mutex
-
-		ch = make(chan struct{})
 	)
 	wg.Add(3)
-	wgServer.Add(2)
-
+	
+	meta := rpc.NewserverMeta()
 	go func() {
+		time.Sleep(time.Second)
 		defer wg.Done()
 		//a := time.Now()
-		<-ch
 		servers := rpc.NewMultiServersDiscovery()
 		wg2 := sync.WaitGroup{}
 
@@ -104,7 +98,7 @@ func main() {
 			wg2.Add(1)
 			go func() {
 				defer wg2.Done()
-				client, _ := rpc.DialServer(servers, rpc.RoundRobinSelect, serverList)
+				client, _ := rpc.DialServer(servers, rpc.RoundRobinSelect, meta.GetServers())
 				var ret = new(Test)
 				err := client.Call(client, "Person.Say3", time.Second*10, ret)
 				if err != nil {
@@ -165,10 +159,8 @@ func main() {
 		s.Register(Person{})
 
 		var address string = "127.0.0.1:20000"
-		lock.Lock()
-		serverList = append(serverList, address)
-		lock.Unlock()
-		wgServer.Done()
+		
+		go rpc.Heartbeat(address)
 		rpc.ListenAndServe(s, "tcp", address)
 	}()
 
@@ -181,15 +173,15 @@ func main() {
 		s.Register(Person{})
 
 		var address string = "127.0.0.1:20001"
-		lock.Lock()
-		serverList = append(serverList, address)
-		lock.Unlock()
-		wgServer.Done()
+		
+		go rpc.Heartbeat(address)
 		rpc.ListenAndServe(s, "tcp", address)
 	}()
 
-	wgServer.Wait()
-	ch <- struct{}{}
+	go func(){
+		http.ListenAndServe(":9000", meta)
+	}()
+
 	wg.Wait()
 	fmt.Println("end")
 }
