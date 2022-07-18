@@ -62,7 +62,7 @@ func (e *EtcdServersDiscovery) Update(servers []string) error {
 
 func (e *EtcdServersDiscovery) GetAll() []string {
 	e.Refresh()
-	return e.servers
+	return e.GetAll()
 }
 
 func (e *EtcdServersDiscovery) Get(mode selectMode) (string, error) {
@@ -121,7 +121,11 @@ func (m *MultiServersDiscovery) Get(mode selectMode) (string, error) {
 }
 
 func (m *MultiServersDiscovery) GetAll() []string {
-	return m.servers
+	m.lock.Lock()
+	defer m.lock.Unlock()
+	tempSlice := make([]string, len(m.servers))
+	copy(tempSlice, m.servers)
+	return tempSlice
 }
 
 func (m *MultiServersDiscovery) Refresh() []string {
