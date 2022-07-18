@@ -124,10 +124,9 @@ func dialServer(protocol, address string) (*Client, error) {
 
 }
 
-func DialServer(discovery Discovery, mode selectMode, serverList []string) (*Client, error) {
+func DialServer(discovery Discovery, mode selectMode) (*Client, error) {
 	//优化
 	once.Do(func(){
-		_ = discovery.Update(serverList)
 		x = &Xclient{
 			clientCache:make(map[string]*Client),
 		}

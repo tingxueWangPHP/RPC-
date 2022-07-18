@@ -5,7 +5,6 @@ import (
 	rpc "rpc/codec"
 	"sync"
 	"time"
-	"net/http"
 )
 
 type Person struct{}
@@ -37,7 +36,7 @@ func (p Person) Say4(m map[string]interface{}) []int {
 	return map[string][]int{"name": a}*/
 	//a := []int{66}
 
-	return []int{1, 2, 3}
+	return []int{1, 2, 3, 4, 5}
 }
 
 func (p Person) Say5(m map[string]interface{}) map[string][]int {
@@ -86,41 +85,41 @@ func main() {
 	)
 	wg.Add(3)
 	
-	meta := rpc.NewserverMeta()
 	go func() {
 		time.Sleep(time.Second)
 		defer wg.Done()
-		//a := time.Now()
-		servers := rpc.NewMultiServersDiscovery()
+		servers := rpc.NewEtcdServersDiscovery()
 		wg2 := sync.WaitGroup{}
 
 		for i := 0; i < 10; i++ {
 			wg2.Add(1)
-			go func() {
+			go func(i int) {
 				defer wg2.Done()
-				client, _ := rpc.DialServer(servers, rpc.RoundRobinSelect, meta.GetServers())
-				var ret = new(Test)
-				err := client.Call(client, "Person.Say3", time.Second*10, ret)
-				if err != nil {
-					fmt.Println(err)
+				var err error
+				client, _ := rpc.DialServer(servers, rpc.RoundRobinSelect)
+				if i == 5 {
+					var ret []int
+					err = client.Call(client, "Person.Say4", time.Second*10, &ret, map[string]interface{}{"name": nil})
+					if err != nil {
+						fmt.Println(err)
+					} else {
+						fmt.Println(ret)
+					}
 				} else {
-					fmt.Println(ret)
+					var ret = new(Test)
+					err = client.Call(client, "Person.Say3", time.Second*10, ret)
+					if err != nil {
+						fmt.Println(err)
+					} else {
+						fmt.Println(ret)
+					}
 				}
-				
-			}()
+			}(i)
 		}
 
 		defer rpc.ClientsClose()
 
 		wg2.Wait()
-
-		/*addr, _ := servers.Get(rpc.RoundRobinSelect)
-
-		client, _ := rpc.DialServer("tcp", addr)
-
-		defer func() {
-			client.Conn.Close()
-		}()*/
 
 		//var ret []int
 		//var ret = make(map[string][]int, 0)
@@ -179,7 +178,7 @@ func main() {
 	}()
 
 	go func(){
-		http.ListenAndServe(":9000", meta)
+		rpc.EtcdServer()
 	}()
 
 	wg.Wait()
