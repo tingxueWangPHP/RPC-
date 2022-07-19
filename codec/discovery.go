@@ -14,6 +14,7 @@ type selectMode int
 const (
 	RandomSelect selectMode = iota
 	RoundRobinSelect
+	IPhash
 )
 
 type Discovery interface {
@@ -49,6 +50,8 @@ func (e *EtcdServersDiscovery) Refresh() error {
 	}
 	
 	e.updateTime = time.Now()
+	//添加到hash环上
+	e.addHash(e.servers...)
 	return nil
 }
 
@@ -57,6 +60,8 @@ func (e *EtcdServersDiscovery) Update(servers []string) error {
 	defer e.lock.Unlock()
 	e.servers = servers
 	e.updateTime = time.Now()
+	//添加到hash环上
+	e.addHash(e.servers...)
 	return nil
 }
 
@@ -85,11 +90,13 @@ type MultiServersDiscovery struct {
 	index   int //轮询索引
 	lock    sync.Mutex
 	rand    *rand.Rand
+	*UniformityHash
 }
 
 func NewMultiServersDiscovery() *MultiServersDiscovery {
 	m := &MultiServersDiscovery{
 		rand: rand.New(rand.NewSource(time.Now().UnixNano())),
+		UniformityHash:NewHash(3, nil),
 	}
 
 	//初始化随机
@@ -102,6 +109,8 @@ func (m *MultiServersDiscovery) Update(servers []string) error {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 	m.servers = servers
+	//添加到hash环上
+	m.addHash(m.servers...)
 	return nil
 }
 
@@ -115,6 +124,9 @@ func (m *MultiServersDiscovery) Get(mode selectMode) (string, error) {
 		return m.servers[m.index%n], nil
 	case RandomSelect:
 		return m.servers[m.rand.Intn(n)], nil
+	case IPhash:
+		//IPhash应放在服务端来做根据客户端的IP进行hash寻找,目前是客户端通过服务发现来寻找服务列表，故拿不到客户端IP
+		return m.getHash("117.22.200.205"), nil
 	default:
 		return "", errors.New("mode error")
 	}

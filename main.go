@@ -96,7 +96,7 @@ func main() {
 			go func(i int) {
 				defer wg2.Done()
 				var err error
-				client, _ := rpc.DialServer(servers, rpc.RoundRobinSelect)
+				client, _ := rpc.DialServer(servers, rpc.IPhash)
 				if i == 5 {
 					var ret []int
 					err = client.Call(client, "Person.Say4", time.Second*10, &ret, map[string]interface{}{"name": nil})
